@@ -1,0 +1,266 @@
+---
+title: "Quelle destination de voyage vous correspond le plus ?"
+author: "MILLION Heidi, SANGIOVANNI Chloé, BALLANCIN Rebecca"
+date: "Analyse de données — M1 APE — 2025-2026"
+output:
+  beamer_presentation:
+    theme: "Madrid"
+    colortheme: "dolphin"
+    latex_engine: xelatex
+fontsize: 11pt
+header-includes:
+  - \usepackage{booktabs}
+  - \useoutertheme{infolines}
+  - \setbeamerfont{author in head/foot}{size=\tiny}
+  - \setbeamercolor{frametitle}{bg=blue!65,fg=white}
+  - \setbeamercolor{title}{fg=white,bg=blue!65}
+  - \setbeamercolor{author in head/foot}{bg=blue!65,fg=white}
+  - \setbeamercolor{date in head/foot}{bg=blue!65,fg=white}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=FALSE, message=FALSE, warning=FALSE)
+
+source("/Users/leosangiovanni/Downloads/Analyse de données/Analyse de donnees/data/Analyse de données/Projet_R_Final_ADD.R")
+
+pref <- c(
+  culture=3, adventure=4, nature=4, beaches=2, nightlife=1,
+  cuisine=3, wellness=1, urban=2, seclusion=2
+)
+```
+
+```{r results, include=FALSE}
+# Paramètres de démo (pour le PPT)
+data_path <- "/Users/leosangiovanni/Downloads/Analyse de données/Analyse de donnees/data/worldwide_travel_cities.csv"
+
+my_budget <- "Mid-range"
+my_duration <- "One week"
+origin_city <- "Paris"
+max_total_budget <- 1500
+mode <- "mixed"
+
+my_month <- 7
+tmin <- 18
+tmax <- 30
+
+# Pipeline basé sur vos fonctions
+Cities <- load_cities_data(data_path)
+Pool <- filter_by_budget_duration(Cities, my_budget, my_duration)
+
+origin_row <- Cities %>%
+  filter(str_to_lower(city) == str_to_lower(origin_city)) %>%
+  slice(1)
+stopifnot(nrow(origin_row) > 0)
+
+lat_col <- if ("latitude" %in% names(Cities)) "latitude" else if ("lat" %in% names(Cities)) "lat" else NA
+lon_col <- if ("longitude" %in% names(Cities)) "longitude" else if ("lon" %in% names(Cities)) "lon" else if ("lng" %in% names(Cities)) "lng" else NA
+stopifnot(!is.na(lat_col), !is.na(lon_col))
+
+origin_lat <- origin_row[[lat_col]][1]
+origin_lon <- origin_row[[lon_col]][1]
+
+Pool <- Pool %>%
+  mutate(
+    distance_km = haversine_km(origin_lat, origin_lon, .data[[lat_col]], .data[[lon_col]]),
+    total_trip_cost = estimate_total_trip_cost(distance_km, budget_level, my_duration, mode = mode)
+  ) %>%
+  filter(total_trip_cost <= max_total_budget)
+
+if (my_month != 0) {
+  Pool <- Pool %>%
+    mutate(temp_avg = purrr::map_dbl(avg_temp_monthly, ~ extract_month_avg_temp(.x, my_month))) %>%
+    filter(!is.na(temp_avg)) %>%
+    filter(temp_avg >= tmin, temp_avg <= tmax)
+} else {
+  Pool <- Pool %>% mutate(temp_avg = NA_real_)
+}
+
+Pool_scored <- score_user_only(Pool, pref)
+
+Top5_results <- Pool_scored %>%
+  slice(1:5) %>%
+  transmute(
+    city, country, region, budget_level,
+    score_user = round(score_user, 2),
+    total_trip_cost = round(total_trip_cost, 0),
+    temp_avg = ifelse(is.na(temp_avg), NA, round(temp_avg, 1))
+  )
+```
+
+
+## Introduction
+
+L’objectif de notre projet est de répondre à la question suivante :
+
+**Quelle destination de voyage correspond le mieux à un profil donné ?**
+
+Pour cela, nous avons développé un programme en R permettant
+de comparer des villes selon des critères hétérogènes
+(préférences, budget, durée, météo).
+
+## Sommaire
+
+1. Présentation de la base de données  
+2. Interaction avec l’utilisateur  
+3. Logique générale de l’outil  
+4. Préférences et score utilisateur  
+5. Contraintes : budget, durée, transport et météo  
+6. Résultats et interprétation  
+7. Limites et conclusion
+
+## Base de données
+
+Notre base de données contient plusieurs villes dans le monde,
+caractérisées par :
+
+- des scores thématiques (culture, nature, aventure, etc.)
+- un niveau de budget
+- des durées de séjour recommandées
+- des coordonnées géographiques
+- des températures moyennes mensuelles
+
+## Interaction avec l’utilisateur
+
+Nous avons commencé par créer plusieurs fonctions
+permettant d’interagir avec l’utilisateur.
+
+Ces fonctions servent à :
+- poser des questions avec des réponses encadrées
+- éviter les erreurs de saisie
+- standardiser les entrées utilisateur
+
+## Logique générale de l’outil
+
+L’outil fonctionne en plusieurs étapes :
+
+1. **Saisie** des préférences utilisateur (0-5)
+2. **Filtrage** budget + durée
+3. **Estimation** coût total (transport + séjour)
+4. **Filtrage météo** (optionnel)
+5. **Scoring** (score_user)
+6. **Classement** → Top 5
+
+## Préférences utilisateur
+
+L’utilisateur exprime son intérêt pour différents types de voyage
+(culture, nature, aventure, etc.) sur une échelle de 0 à 5.
+
+Ces valeurs permettent de représenter son profil de voyageur.
+
+**Exemple de profil :**
+
+```{r fig.height=4.2}
+pref_df <- tibble(critere = names(pref), score = as.numeric(pref))
+
+ggplot(pref_df, aes(x = reorder(critere, score), y = score)) +
+  geom_col(fill = "#2E86AB") +
+  coord_flip() +
+  scale_y_continuous(breaks = 0:5, limits = c(0,5)) +
+  labs(title = "Profil de préférences", x = NULL, y = "Score (0-5)") +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+```
+
+## Score utilisateur
+
+Le score est une **somme pondérée** des dimensions :
+
+**score_user = Σ (poids_k × score_ville_k)**
+
+- poids_k : préférences utilisateur **normalisées** (somme = 1)
+- score_ville_k : score de la ville sur la dimension k
+
+On obtient une compatibilité **personnalisée**.
+
+## Contraintes budgétaires et temporelles
+
+Avant le calcul du score final, les villes sont filtrées selon :
+
+- **Budget level** sélectionné
+- **Durée** souhaitée (Day trip → Long trip)
+
+Cela permet de ne conserver que les destinations réalistes pour l’utilisateur.
+But : éviter de scorer des villes **hors contraintes**.
+
+## Coût total estimé
+
+On enrichit le budget en tenant compte de la **ville de départ** :
+
+- Distance via **Haversine** (coordonnées)
+- Coût transport selon **mode** (bus/train/car/plane/mixed)
+- Coût séjour = **coût journalier × jours**
+
+**Budget total = transport + séjour**
+
+## Prise en compte de la météo
+
+L’utilisateur peut indiquer :
+
+- un **mois** (1-12)
+- une plage de température **[tmin ; tmax]**
+
+On garde uniquement les villes dont la **température moyenne** du mois est compatible.
+
+## Résultats : Top 5
+
+Les villes restantes sont classées selon le score utilisateur.
+
+Nous présentons les 5 destinations les plus adaptées au profil de l’utilisateur.
+
+```{r results_table}
+tab <- Top5_results %>%
+  dplyr::rename(
+    Ville = city,
+    Pays = country,
+    Region = region,
+    Budget = budget_level,
+    Score = score_user,
+    Cout_total = total_trip_cost,
+    Temp = temp_avg
+  )
+
+knitr::kable(
+  tab,
+  format = "latex",
+  booktabs = TRUE,
+  align = "l"
+)
+```
+
+## Interprétation des résultats
+
+Les villes proposées :
+
+- maximisent **score_user**
+- respectent **budget total**, **durée** et **météo**
+- reflètent les **priorités dominantes** du profil
+
+Le classement change si on modifie les préférences.
+
+## Limites
+
+- Coûts **estimés** (pas de prix temps réel)
+- Hypothèses simplifiées sur le transport
+- Ville de départ limitée aux villes présentes dans la base
+
+
+## Conclusion
+
+Au cours de ce projet, nous avons développé un outil en R permettant de
+**recommander des destinations de voyage de manière personnalisée**.
+
+✔ Les préférences utilisateur sont traduites en **critères quantifiables**  
+✔ Les contraintes réelles (budget, durée, transport, météo) sont intégrées  
+✔ Les destinations sont **comparées et classées objectivement**
+
+### Forces du programme
+- Forte **personnalisation**
+- Code **modulaire et flexible** (fonctions)
+- Prise en compte d’un **budget total réaliste**
+- Résultats **reproductibles et transparents**
+
+Ce projet montre comment l’analyse de données peut **structurer une décision complexe**
+et servir d’outil d’aide à la décision concret.
