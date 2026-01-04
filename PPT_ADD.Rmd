@@ -125,6 +125,7 @@ Nous avons commencé par créer plusieurs fonctions
 permettant d’interagir avec l’utilisateur.
 
 Ces fonctions servent à :
+
 - poser des questions avec des réponses encadrées
 - éviter les erreurs de saisie
 - standardiser les entrées utilisateur
