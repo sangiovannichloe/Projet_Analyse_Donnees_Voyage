@@ -117,16 +117,3 @@ Les villes sont ensuite classées par score décroissant et le programme
 retourne : - un **Top 5 de destinations**, - le score utilisateur
 associé, - le coût total estimé du voyage, - ainsi que la température
 moyenne (si le filtre météo est activé).
-
-------------------------------------------------------------------------
-
-## Améliorations possibles
-
-Plusieurs améliorations peuvent être envisagées, notamment : -
-l’intégration de données de transport en temps réel via une API (par
-exemple Rome2Rio), - une estimation plus fine des coûts, - l’ajout de
-nouveaux critères (sécurité, affluence touristique, saisonnalité), - le
-développement d’une interface graphique interactive (Shiny).
-
-Ce projet pourrait ainsi être facilement étendu et adapté à d’autres
-contextes d’aide à la décision.
