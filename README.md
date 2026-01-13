@@ -3,7 +3,9 @@ README
 
 # Outil de recommandation de destinations de voyage personnalisées
 
-**Analyse de données – M1 APE – 2025-2026**
+**Analyse de données - M1 APE - 2025-2026**
+
+**Rebecca BALLANCIN - Chloé SANGIOVANNI - Heidi MILLION**
 
 ------------------------------------------------------------------------
 
